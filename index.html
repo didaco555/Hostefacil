@@ -202,6 +202,11 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
       <p class="hint">L'identificador policial el donen els Mossos (9 o 10 caràcters, per exemple 08043AAR02).</p>
     </div>
     <div class="card">
+      <h2>Dades de l'hotel</h2>
+      <div class="grid" id="hotGrid"></div>
+      <p class="hint">Són dades d'exemple de l'Hotel Solsona Centre, per tenir-les a mà quan el portal les demana (alta PI-15). Es poden editar. L'identificador policial el donen els Mossos i s'ha de posar a dalt.</p>
+    </div>
+    <div class="card">
       <h2>Format del fitxer</h2>
       <div class="grid" id="fmtGrid"></div>
       <p class="hint">El manual descriu 32 camps per viatger però diu que en valida 31. Si el portal rebutja el fitxer pel nombre de camps, indica aquí el número d'ordre del camp que sobra i torna a generar. El portal diu quin error hi ha.</p>
@@ -524,8 +529,14 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   const defStay = (seq = 0) => ({ inDate: today(), inTime: nowHM(), nights: 1, outDate: addDays(today(), 1), outTime: '11:00', contractDate: today(), type: 'C', number: newNumber(seq), pay: 'TARJT', phone: '', email: '', rooms: '', internet: '' });
   const emptyTrav = () => ({ docType: 'D', docNumber: '', support: '', issueDate: '', surname1: '', surname2: '', name: '', sex: 'M', birth: '', nationality: 'ESP', kin: '', country: 'ESP', street: '', muni: '', muniName: '', locality: '', postcode: '', spanish: true });
   let S = { settings: { code: '', name: '', enc: 'latin1', seq: 1, removeIdx: '', checkout: '11:00' }, stay: defStay(), tray: [], stays: 0, lastFile: null };
+  const HOTEL = { name: 'HOTEL SOLSONA CENTRE', checkout: '11:00', internet: 'S', owner: 'Dosemes del Solsonès, SL', address: 'Carrer Àngel Guimerà, 3, 25280 Solsona (Lleida)', phone: '650 464 032', email: 'hotelsolsonacentre@yahoo.es', tourismReg: 'HCC-000764' };
   let memOnly = false;
   try { const raw = localStorage.getItem(KEY); if (raw) { const o = JSON.parse(raw); S = { ...S, ...o, settings: { ...S.settings, ...(o.settings || {}) } }; } } catch (e) { memOnly = true; }
+  if (!S.seeded) {
+    for (const [k, v] of Object.entries(HOTEL)) if (!S.settings[k]) S.settings[k] = v;
+    S.stay.rooms = S.stay.rooms || S.settings.rooms || ''; S.stay.internet = S.stay.internet || S.settings.internet || '';
+    S.seeded = true;
+  }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { memOnly = true; } };
   let cur = emptyTrav(); let editingId = null; let showErr = false; let mrzBad = [];
 
@@ -580,8 +591,16 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
       { k: 'postcode', l: 'Codi postal', t: 'text', inputmode: 'numeric', full: 1 },
     ],
     set: [
-      { k: 'code', l: 'Identificador policial', t: 'text', caps: 1 }, { k: 'name', l: 'Nom de l\'establiment', t: 'text', caps: 1 },
+      { k: 'code', l: 'Identificador policial <i>(dels Mossos)</i>', t: 'text', caps: 1, ph: '9 o 10 caràcters' }, { k: 'name', l: 'Nom de l\'establiment', t: 'text', caps: 1 },
       { k: 'checkout', l: 'Hora de sortida habitual', t: 'time' },
+      { k: 'rooms', l: 'Nombre d\'habitacions <i>(opcional)</i>', t: 'number', inputmode: 'numeric' },
+      { k: 'internet', l: 'Internet <i>(opcional)</i>', t: 'select', o: () => opts([['', '—'], ['S', 'Sí'], ['N', 'No']], S.settings.internet) },
+    ],
+    hotel: [
+      { k: 'owner', l: 'Titular', t: 'text', full: 1 },
+      { k: 'address', l: 'Adreça', t: 'text', full: 1 },
+      { k: 'phone', l: 'Telèfon', t: 'tel', inputmode: 'tel' }, { k: 'email', l: 'Correu', t: 'email', inputmode: 'email' },
+      { k: 'tourismReg', l: 'Registre de turisme de Catalunya', t: 'text', full: 1 },
     ],
     fmt: [
       { k: 'enc', l: 'Codificació', t: 'select', o: () => opts([['latin1', 'Latin-1 (per defecte)'], ['utf8', 'UTF-8']], S.settings.enc) },
@@ -594,7 +613,7 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     if (f.t === 'select') c = `<select id="${id}" data-g="${grp}" data-k="${f.k}">${f.o()}</select>`;
     else if (f.t === 'info') c = `<div id="outInfo" class="note ok" style="min-height:46px;display:flex;align-items:center"></div>`;
     else if (f.t === 'muni') c = `<div class="acc"><input id="muniText" type="text" autocomplete="off" autocorrect="off" placeholder="Escriu el nom del municipi"><ul id="muniList" hidden></ul></div>`;
-    else c = `<input id="${id}" data-g="${grp}" data-k="${f.k}" type="${f.t === 'tel' || f.t === 'email' || f.t === 'number' ? f.t : f.t === 'date' || f.t === 'time' ? f.t : 'text'}"${f.inputmode ? ` inputmode="${f.inputmode}"` : ''}${f.caps ? ' autocapitalize="characters"' : ''} autocorrect="off" spellcheck="false"${f.autocomplete ? ` autocomplete="${f.autocomplete}"` : ''}>`;
+    else c = `<input id="${id}" data-g="${grp}" data-k="${f.k}" type="${f.t === 'tel' || f.t === 'email' || f.t === 'number' ? f.t : f.t === 'date' || f.t === 'time' ? f.t : 'text'}"${f.inputmode ? ` inputmode="${f.inputmode}"` : ''}${f.caps ? ' autocapitalize="characters"' : ''}${f.ph ? ` placeholder="${f.ph}"` : ''} autocorrect="off" spellcheck="false"${f.autocomplete ? ` autocomplete="${f.autocomplete}"` : ''}>`;
     return `<div class="f${f.full ? ' full' : ''}" data-fw="${grp}.${f.k}"><label for="${f.t === 'muni' ? 'muniText' : id}">${f.l}</label>${c}<div class="msg"></div></div>`;
   };
   const build = () => {
@@ -602,6 +621,7 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     $('travGrid').innerHTML = FIELDS.trav.map((f) => fieldHTML('trav', f)).join('');
     $('addrGrid').innerHTML = FIELDS.addr.map((f) => fieldHTML('addr', f)).join('');
     $('setGrid').innerHTML = FIELDS.set.map((f) => fieldHTML('set', f)).join('');
+    $('hotGrid').innerHTML = FIELDS.hotel.map((f) => fieldHTML('set', f)).join('');
     $('fmtGrid').innerHTML = FIELDS.fmt.map((f) => fieldHTML('fmt', f)).join('');
   };
   const model = (g) => g === 'stay' ? S.stay : g === 'set' || g === 'fmt' ? S.settings : cur;
@@ -629,7 +649,7 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
 
   document.addEventListener('input', (ev) => {
     const el = ev.target; const g = el.dataset && el.dataset.g; if (!g) return;
-    let v = el.value; const f = [...FIELDS.stay, ...FIELDS.trav, ...FIELDS.addr, ...FIELDS.set, ...FIELDS.fmt].find((x) => x.k === el.dataset.k);
+    let v = el.value; const f = [...FIELDS.stay, ...FIELDS.trav, ...FIELDS.addr, ...FIELDS.set, ...FIELDS.hotel, ...FIELDS.fmt].find((x) => x.k === el.dataset.k);
     if (f && f.caps) { v = v.toUpperCase(); }
     model(g)[el.dataset.k] = v;
     if (g === 'addr') cur[el.dataset.k] = v;
@@ -775,7 +795,7 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   $('btnApplyStay').addEventListener('click', () => {
     S.tray.forEach((t) => { if (!t.generated) t.stay = { ...S.stay }; }); save(); renderAll(); toast('Estada aplicada a les fitxes pendents');
   });
-  $('btnNewStay').addEventListener('click', () => { S.stays = (S.stays || 0) + 1; S.stay = defStay(S.stays); recalcOut(); cur = emptyTrav(); showErr = false; save(); pushValues(); paint(); toast('Nova estada preparada'); });
+  $('btnNewStay').addEventListener('click', () => { S.stays = (S.stays || 0) + 1; S.stay = defStay(S.stays); S.stay.rooms = S.settings.rooms || ''; S.stay.internet = S.settings.internet || ''; recalcOut(); cur = emptyTrav(); showErr = false; save(); pushValues(); paint(); toast('Nova estada preparada'); });
 
   $('btnAdd').addEventListener('click', () => {
     showErr = true; paint();
@@ -837,8 +857,8 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     const b = $('btnWipe');
     if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Segur? Torna a tocar per esborrar'; setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Esborrar totes les dades d\'aquest mòbil'; }, 4000); return; }
     try { localStorage.removeItem(KEY); } catch (e) {}
-    S = { settings: { code: '', name: '', enc: 'latin1', seq: 1, removeIdx: '', checkout: '11:00' }, stay: defStay(), tray: [], stays: 0, lastFile: null };
-    cur = emptyTrav(); b.dataset.armed = ''; b.textContent = 'Esborrar totes les dades d\'aquest mòbil'; $('cardFile').hidden = true; pushValues(); renderAll(); toast('Dades esborrades');
+    S = { settings: { code: '', name: '', enc: 'latin1', seq: 1, removeIdx: '', checkout: '11:00', ...HOTEL }, stay: defStay(), tray: [], stays: 0, lastFile: null, seeded: true };
+    S.stay.internet = S.settings.internet; cur = emptyTrav(); b.dataset.armed = ''; b.textContent = 'Esborrar totes les dades d\'aquest mòbil'; $('cardFile').hidden = true; pushValues(); renderAll(); toast('Dades esborrades');
   });
 
   /* ---------- pestanyes ---------- */
