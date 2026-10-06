@@ -713,12 +713,17 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     return ocrWorker;
   };
   const setOcr = (msg, cls = 'warn') => { const st = $('mrzStatus'); st.className = 'status on'; st.innerHTML = `<div class="note ${cls}">${esc(msg)}</div>`; };
-  const prepCanvas = (bmp, fromFrac) => {
-    const sy = Math.floor(bmp.height * fromFrac), sh = bmp.height - sy;
-    const sc = Math.min(2, 1800 / bmp.width); const w = Math.round(bmp.width * sc), h = Math.round(sh * sc);
-    const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d', { willReadFrequently: true });
-    x.drawImage(bmp, 0, sy, bmp.width, sh, 0, 0, w, h);
-    const im = x.getImageData(0, 0, w, h), d = im.data; let lo = 255, hi = 0;
+  const prepCanvas = (bmp, fromFrac, angle = 0) => {
+    const base = Math.min(2, 1800 / Math.max(bmp.width, 1));
+    const bw = bmp.width * base, bh = bmp.height * base, r = angle * Math.PI / 180;
+    const W = Math.round(Math.abs(bw * Math.cos(r)) + Math.abs(bh * Math.sin(r))), H = Math.round(Math.abs(bw * Math.sin(r)) + Math.abs(bh * Math.cos(r)));
+    const src = document.createElement('canvas'); src.width = W; src.height = H;
+    const sx = src.getContext('2d'); sx.fillStyle = '#808080'; sx.fillRect(0, 0, W, H);
+    sx.translate(W / 2, H / 2); sx.rotate(r); sx.drawImage(bmp, -bw / 2, -bh / 2, bw, bh);
+    const y0 = Math.floor(H * fromFrac), h = H - y0;
+    const c = document.createElement('canvas'); c.width = W; c.height = h; const x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(src, 0, y0, W, h, 0, 0, W, h);
+    const im = x.getImageData(0, 0, W, h), d = im.data; let lo = 255, hi = 0;
     for (let i = 0; i < d.length; i += 4) { const g = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) | 0; d[i] = g; if (g < lo) lo = g; if (g > hi) hi = g; }
     const k = hi > lo ? 255 / (hi - lo) : 1;
     for (let i = 0; i < d.length; i += 4) { const g = Math.max(0, Math.min(255, (d[i] - lo) * k)) | 0; d[i] = d[i + 1] = d[i + 2] = g; }
@@ -731,11 +736,15 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     try {
       const bmp = await createImageBitmap(file);
       const w = await getWorker(); let best = null; let lastText = '';
-      for (const frac of [0.5, 0.35, 0.62, 0]) {
-        const { data } = await w.recognize(prepCanvas(bmp, frac)); lastText = data.text;
-        const r = HF.mrzFromOcr(data.text);
-        if (r && (!best || r.score < best.score)) best = r;
-        if (best && best.score === 0) break;
+      const plan = [[0, [0.5, 0.35, 0.62, 0]], [4, [0.5, 0]], [-4, [0.5, 0]], [8, [0.5, 0]], [-8, [0.5, 0]], [90, [0.5]], [270, [0.5]], [180, [0.5]]];
+      outer: for (const [ang, fracs] of plan) {
+        if (ang !== 0) setOcr('Provant d\'enderrerir la foto…');
+        for (const frac of fracs) {
+          const { data } = await w.recognize(prepCanvas(bmp, frac, ang)); lastText = data.text;
+          const r = HF.mrzFromOcr(data.text);
+          if (r && (!best || r.score < best.score)) best = r;
+          if (best && best.score === 0) break outer;
+        }
       }
       if (!best) { setOcr('No he trobat les línies del document. Fes la foto de la cara amb les línies «<<<<» ben enquadrades, o enganxa-les a sota.', 'err'); return; }
       const txt = best.lines.join('\n'); $('mrz').value = txt; applyMrz(txt);
