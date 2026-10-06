@@ -188,6 +188,11 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
       </ol>
       <div class="note ok"><b>Ho vols tot d'una vegada?</b> 1) Arrossega aquest botó a la barra de preferits del navegador (només el primer cop; si no la veus: Ctrl+Maj+B): <a id="bmLink" class="btn small primary" href="#" draggable="true" onclick="return false">Omplir portal Mossos</a><br>2) Prem <b>Copiar-ho tot per al portal</b>. 3) Ves a «Nou registre viatger» al portal i toca el preferit: omple tots els camps. Revisa-ho i desa tu.</div>
       <div class="row"><button class="btn primary" id="btnCopyAll" type="button">Copiar-ho tot per al portal</button></div>
+      <details class="note"><summary><b>A l'iPhone (Safari)</b></summary>
+        <ol class="steps"><li>Només el primer cop: a Safari, obre aquesta app, toca Compartir → <b>Afegir preferit</b> i desa'l amb el nom «Omplir portal Mossos».</li>
+        <li>Prem aquí: <button class="btn small" id="btnCopyBm" type="button">Copiar el codi del preferit</button></li>
+        <li>A Safari: icona del llibre → Preferits → <b>Editar</b> → toca «Omplir portal Mossos» → esborra l'adreça i enganxa el codi → Fet.</li>
+        <li>Cada registre: prem «Copiar-ho tot per al portal», obre el portal a Safari, entra a «Nou registre viatger», toca el llibre i el preferit. Si Safari pregunta «Enganxar», accepta.</li></ol></details>
       <div id="manRows"></div>
       <button class="btn" id="btnManDone" type="button">Tancar</button>
     </div>
@@ -1175,6 +1180,10 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
     const v = JSON.stringify(window.__payload || {});
     try { await navigator.clipboard.writeText(v); } catch (e) { const ta = document.createElement('textarea'); ta.value = v; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e2) {} ta.remove(); }
     toast('Copiat. Ara ves al portal i toca el preferit «Omplir portal Mossos»');
+  });
+  $('btnCopyBm').addEventListener('click', async () => {
+    const v = 'javascript:' + encodeURIComponent(FILLJS);
+    try { await navigator.clipboard.writeText(v); toast('Codi copiat. Ara enganxa\'l a l\'adreça del preferit'); } catch (e) { const ta = document.createElement('textarea'); ta.value = v; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Codi copiat'); } catch (e2) { toast('No s\'ha pogut copiar'); } ta.remove(); }
   });
   $('btnManDone').addEventListener('click', () => { $('cardManual').hidden = true; });
   $('btnCancelEdit').addEventListener('click', () => { cur = emptyTrav(); editingId = null; showErr = false; $('btnAdd').textContent = 'Afegir a la safata'; $('btnCancelEdit').hidden = true; pushValues(); paint(); });
