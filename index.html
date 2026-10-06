@@ -2,7 +2,7 @@
 <html lang="ca"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="HosteFàcil"><meta name="theme-color" content="#0d5c63">
 <link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon-180.png"><link rel="icon" href="icon-180.png">
-<script src="vendor/tesseract.min.js"></script><script>window.HF_OCR=true</script>
+<script>window.HF_OCR=true;window.HF_READY=new Promise(function(res){function load(b,cb){var s=document.createElement('script');s.src=b+'tesseract.min.js';s.onload=function(){window.HF_BASE=b;cb(true)};s.onerror=function(){cb(false)};document.head.appendChild(s)}load('./',function(ok){if(ok)return res(true);load('vendor/',function(ok2){res(ok2)})})});</script>
 <style>:root{color-scheme:light dark}html{padding-top:env(safe-area-inset-top,0px)}body{margin:0}</style>
 <title>HosteFàcil</title>
 
@@ -210,6 +210,12 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
       <h2>Format del fitxer</h2>
       <div class="grid" id="fmtGrid"></div>
       <p class="hint">El manual descriu 32 camps per viatger però diu que en valida 31. Si el portal rebutja el fitxer pel nombre de camps, indica aquí el número d'ordre del camp que sobra i torna a generar. El portal diu quin error hi ha.</p>
+    </div>
+    <div class="card" id="cardReader" hidden>
+      <h2>Lector de fotos</h2>
+      <p class="hint">Comprova que els fitxers del lector estan al repositori de GitHub.</p>
+      <button class="btn small" id="btnCheckReader" type="button">Comprovar</button>
+      <div id="readerReport"></div>
     </div>
     <div class="card">
       <h2>Privacitat</h2>
@@ -717,7 +723,8 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   let ocrWorker = null;
   const getWorker = async () => {
     if (ocrWorker) return ocrWorker;
-    ocrWorker = await Tesseract.createWorker('mrz', 1, { workerPath: 'vendor/worker.min.js', corePath: 'vendor/', langPath: 'vendor/', gzip: false, workerBlobURL: false, logger: (m) => { if (m.status === 'recognizing text') setOcr(`Llegint el document… ${Math.round(m.progress * 100)}%`); } });
+    const B = window.HF_BASE || './';
+    ocrWorker = await Tesseract.createWorker('mrz', 1, { workerPath: B + 'worker.min.js', corePath: B, langPath: B, gzip: false, workerBlobURL: false, logger: (m) => { if (m.status === 'recognizing text') setOcr(`Llegint el document… ${Math.round(m.progress * 100)}%`); } });
     await ocrWorker.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<', tessedit_pageseg_mode: '6' });
     return ocrWorker;
   };
@@ -740,7 +747,11 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   };
   let reading = false;
   const readPhoto = async (file) => {
-    if (!window.HF_OCR || typeof Tesseract === 'undefined' || reading) return;
+    if (reading) { toast('Ja s\'està llegint la foto…'); return; }
+    if (!window.HF_OCR) { setOcr('Aquesta versió no llegeix fotos soles. Enganxa les línies a sota.', 'err'); return; }
+    setOcr('Llegint el document…'); $('mrzStatus').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const loaded = await (window.HF_READY || Promise.resolve(false));
+    if (!loaded || typeof Tesseract === 'undefined') { setOcr('El lector de fotos no s\'ha carregat: falten fitxers al repositori de GitHub (tesseract.min.js, worker.min.js, els dos tesseract-core i mrz.traineddata). Ves a Ajustos → Lector de fotos → Comprovar.', 'err'); return; }
     reading = true; const btn = $('btnRead'); btn.disabled = true; btn.textContent = 'Llegint…';
     const t0 = Date.now(); let tries = 0;
     const say = (m) => setOcr(`${m} (${Math.round((Date.now() - t0) / 1000)} s)`);
@@ -782,6 +793,24 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   $('photo').addEventListener('change', onPhoto);
   $('photoLib').addEventListener('change', onPhoto);
   $('btnRead').addEventListener('click', () => { if (lastFile) readPhoto(lastFile); });
+  if (window.HF_OCR) {
+    $('cardReader').hidden = false;
+    const FILES = ['tesseract.min.js', 'worker.min.js', 'tesseract-core-simd-lstm.wasm.js', 'tesseract-core-lstm.wasm.js', 'mrz.traineddata'];
+    const checkReader = async () => {
+      const B = window.HF_BASE || './'; const rep = $('readerReport'); rep.innerHTML = '<div class="hint">Comprovant…</div>';
+      const rows = [];
+      for (const f of FILES) {
+        let ok = false, info = '';
+        try { const r = await fetch(B + f, { method: 'GET', cache: 'no-store' }); ok = r.ok; info = r.ok ? Math.round((+r.headers.get('content-length') || 0) / 1024) + ' KB' : 'error ' + r.status; try { r.body && r.body.cancel(); } catch (e) {} }
+        catch (e) { info = 'no es pot descarregar'; }
+        rows.push(`<div class="note ${ok ? 'ok' : 'err'}">${ok ? '✓' : '✗'} ${f} ${ok ? '' : '(' + info + ')'}</div>`);
+      }
+      const all = rows.every((r) => r.includes('class="note ok"'));
+      rep.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">${rows.join('')}<div class="hint">${typeof Tesseract === 'undefined' ? 'El lector no s\'ha carregat en aquesta pàgina.' : all ? 'Tot correcte: el lector està carregat.' : 'Falten fitxers: puja\'ls al repositori, a la mateixa carpeta que index.html.'}</div></div>`;
+    };
+    $('btnCheckReader').addEventListener('click', checkReader);
+    (window.HF_READY || Promise.resolve(false)).then((ok) => { if (!ok) { setOcr('El lector de fotos no s\'ha carregat. Ves a Ajustos → Lector de fotos → Comprovar per veure què falta.', 'err'); } });
+  }
   $('btnClearMrz').addEventListener('click', () => { $('mrz').value = ''; $('mrzStatus').className = 'status'; mrzBad = []; if (objUrl) { URL.revokeObjectURL(objUrl); objUrl = null; } $('preview').classList.remove('on'); $('photo').value = ''; $('photoLib').value = ''; lastFile = null; $('btnRead').hidden = true; paint(); });
   $('btnDemo').addEventListener('click', () => {
     const demo = 'I<UTOD231458907<<<<<<<<<<<<<<<\n7408122F3204153UTO<<<<<<<<<<<2\nERIKSSON<<ANNA<MARIA<<<<<<<<<<';
