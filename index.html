@@ -269,7 +269,7 @@ const HF = (() => {
   }
 
   function splitNames(l, issuing) {
-    const t = l.replace(/(<|K|C|L|E|S){3,}$/, '<<').replace(/<+$/, '');
+    const t = l.replace(/<+$/, '').replace(/([KCLES])\1{3,}$/, '').replace(/[KCLES]{6,}$/, '');
     const i = t.indexOf('<<');
     const sur = (i < 0 ? t : t.slice(0, i)).split('<').filter(Boolean);
     const giv = (i < 0 ? '' : t.slice(i + 2)).split('<').filter(Boolean).join(' ');
@@ -342,6 +342,11 @@ const HF = (() => {
       } else { r.docNumber = docnum; w.push('Document d\'identitat estranger que no és passaport: el portal només admet D, N o P. S\'ha posat com a passaport.'); }
     } else { r.docNumber = docnum; }
     r.spanish = issuing === 'ESP';
+    // Si només falla el dígit global però el número DNI/NIE és vàlid, és soroll en el farciment: no compta com a error.
+    if (bad.has('global') && ((r.docType === 'D' && dniOk(r.docNumber)) || (r.docType === 'N' && nieOk(r.docNumber))) && !bad.has('doc') && !bad.has('birth') && !bad.has('exp')) {
+      bad.delete('global');
+      const i = w.indexOf('Dígit de control global no quadra'); if (i >= 0) w.splice(i, 1);
+    }
     if (exp && new Date(exp + 'T23:59:59Z') < today) w.push('Document caducat.');
     return { ok: true, data: r, warnings: w, bad: [...bad], format: fmt };
   }
@@ -350,8 +355,11 @@ const HF = (() => {
   /** Tria la millor lectura d'unes línies d'OCR: prova a retallar caràcters sobrants al davant de la primera línia. */
   function parseBest(lines, today = new Date()) {
     let best = null;
-    for (let off = 0; off <= 2; off++) {
-      const ls = lines.slice(); ls[0] = ls[0].slice(off);
+    const L0 = lines[0]; const variants = [0, 1, 2].map((off) => L0.slice(off));
+    if (lines.length === 3 && L0.length < 30) { variants.push('ID' + L0, 'I<' + L0, 'D' + L0); }
+    if (lines.length === 2 && L0.length < 44) { variants.push('P<' + L0); }
+    for (const v of variants) {
+      const ls = lines.slice(); ls[0] = v;
       const r = parseMrz(ls.join('\n'), today);
       r.score = r.ok ? r.bad.length : 99; r.lines = ls;
       if (!best || r.score < best.score) best = r;
@@ -368,6 +376,7 @@ const HF = (() => {
         if (r.ok && (!best || r.score < best.score)) best = r;
       }
     }
+    if (best && best.lines.length === 3 && !/^[IAC][A-Z<]/.test(best.lines[0])) best.lines[0] = 'ID' + best.lines[0].slice(2);
     return best;
   }
 
@@ -732,25 +741,32 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   let reading = false;
   const readPhoto = async (file) => {
     if (!window.HF_OCR || typeof Tesseract === 'undefined' || reading) return;
-    reading = true; setOcr('Llegint el document…');
+    reading = true; const btn = $('btnRead'); btn.disabled = true; btn.textContent = 'Llegint…';
+    const t0 = Date.now(); let tries = 0;
+    const say = (m) => setOcr(`${m} (${Math.round((Date.now() - t0) / 1000)} s)`);
+    $('mrzStatus').scrollIntoView({ block: 'center', behavior: 'smooth' });
     try {
+      say('Llegint el document…');
       const bmp = await createImageBitmap(file);
-      const w = await getWorker(); let best = null; let lastText = '';
-      const plan = [[0, [0.5, 0.35, 0.62, 0]], [4, [0.5, 0]], [-4, [0.5, 0]], [8, [0.5, 0]], [-8, [0.5, 0]], [90, [0.5]], [270, [0.5]], [180, [0.5]]];
-      outer: for (const [ang, fracs] of plan) {
-        if (ang !== 0) setOcr('Provant d\'enderrerir la foto…');
-        for (const frac of fracs) {
-          const { data } = await w.recognize(prepCanvas(bmp, frac, ang)); lastText = data.text;
-          const r = HF.mrzFromOcr(data.text);
-          if (r && (!best || r.score < best.score)) best = r;
-          if (best && best.score === 0) break outer;
-        }
+      const w = await getWorker(); let best = null; let psm = '';
+      const setPsm = async (m) => { if (psm !== m) { await w.setParameters({ tessedit_pageseg_mode: m }); psm = m; } };
+      // [angle, fracció inicial, mode de segmentació]. El mode 3 troba el text sol a tota la foto.
+      const plan = [[0, 0, '3'], [0, 0.5, '6'], [0, 0.35, '6'], [270, 0, '3'], [90, 0, '3'], [180, 0, '3'],
+        [4, 0, '3'], [-4, 0, '3'], [8, 0, '3'], [-8, 0, '3'], [4, 0.5, '6'], [-4, 0.5, '6'], [270, 0.5, '6'], [90, 0.5, '6'], [0, 0.62, '6']];
+      for (const [ang, frac, mode] of plan) {
+        if (Date.now() - t0 > 75000) break;
+        tries++; say(ang ? 'Provant d\'enderrerir la foto…' : 'Llegint el document…');
+        await setPsm(mode);
+        const { data } = await w.recognize(prepCanvas(bmp, frac, ang));
+        const r = HF.mrzFromOcr(data.text);
+        if (r && (!best || r.score < best.score)) best = r;
+        if (best && best.score === 0) break;
       }
-      if (!best) { setOcr('No he trobat les línies del document. Fes la foto de la cara amb les línies «<<<<» ben enquadrades, o enganxa-les a sota.', 'err'); return; }
+      if (!best) { setOcr('No he trobat les línies del document. Fes la foto de la cara amb les línies «<<<<» ben enquadrades i ben il·luminades, o enganxa-les a sota.', 'err'); return; }
       const txt = best.lines.join('\n'); $('mrz').value = txt; applyMrz(txt);
       toast(best.score === 0 ? 'Document llegit' : 'Document llegit: revisa els camps en groc');
-    } catch (e) { setOcr('No s\'ha pogut llegir la foto. Enganxa les línies a sota.', 'err'); }
-    finally { reading = false; }
+    } catch (e) { setOcr('No s\'ha pogut llegir la foto (' + (e && (e.message || e.name) || 'error') + '). Enganxa les línies a sota.', 'err'); }
+    finally { reading = false; btn.disabled = false; btn.textContent = 'Llegir la foto i omplir les dades'; }
   };
   let objUrl = null;
   let lastFile = null;
