@@ -1130,14 +1130,27 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
   });
   $('btnSave').addEventListener('click', async () => {
     const name = S.lastFile ? S.lastFile.name : 'fitxer.001.txt';
+    const data = S.settings.enc === 'utf8' ? fileText : HF.encodeLatin1(fileText);
+    const note = (h) => { $('sentMsg').innerHTML = h; };
+    // 1) dins de Claude
+    try { const dl = await window.claude?.use?.('downloads'); if (dl) { await dl.save({ filename: name, data }); toast('Fitxer desat'); return; } } catch (e) { if (e && e.code === 'declined') return; }
+    const blob = new Blob([data], { type: 'text/plain' });
+    // 2) mòbil: full de compartir → «Desar a Fitxers»
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (ios || /Android/i.test(navigator.userAgent)) {
+      try {
+        const file = new File([blob], name, { type: 'text/plain' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); toast('Tria «Desar a Fitxers»'); return; }
+      } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    // 3) descàrrega normal
     try {
-      const dl = await window.claude?.use?.('downloads');
-      if (!dl) throw { code: 'unavailable' };
-      const data = S.settings.enc === 'utf8' ? fileText : HF.encodeLatin1(fileText);
-      await dl.save({ filename: name, data }); toast('Fitxer desat');
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
+      const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000);
+      toast('Descarregant ' + name); note('<div class="note">Si no apareix, mira a «Descàrregues» o a l\'app Fitxers. Si no, prem «Copiar text».</div>');
     } catch (e) {
-      if (e && e.code === 'declined') return;
-      $('sentMsg').innerHTML = '<div class="note warn">No s\'ha pogut desar directament. Prem «Copiar text», enganxa\'l en un fitxer de text amb el nom ' + esc(name) + ' i puja\'l.</div>';
+      note('<div class="note warn">No s\'ha pogut desar directament. Prem «Copiar text», enganxa\'l en un fitxer de text amb el nom ' + esc(name) + ' i puja\'l.</div>');
     }
   });
   $('btnCopy').addEventListener('click', async () => {
