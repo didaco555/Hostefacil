@@ -62,6 +62,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid v
 .btn.file{position:relative;overflow:hidden}
 .btn.file input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;font-size:0}
 .row{display:flex;gap:10px;flex-wrap:wrap}
+.mh{margin:14px 0 4px;font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.7}
+.mrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.mrow .ml{flex:0 0 38%;font-size:13px;opacity:.75}.mrow .mv{flex:1;font-weight:600;word-break:break-word}.mrow.done .mv{opacity:.45}.mrow .btn{min-height:36px;padding:4px 12px;font-size:14px}
 .row>*{flex:1 1 auto}
 .hint{font-size:13.5px;color:var(--muted);margin:0}
 .hint b{color:var(--ink)}
@@ -173,6 +176,20 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
       </div>
       <button class="btn small" id="btnApplyStay" type="button">Aplicar l'estada actual a les fitxes pendents</button>
       <div id="genMsg"></div>
+    </div>
+
+        <div class="card" id="cardManual" hidden>
+      <h2 id="manTitle">Omplir el portal camp a camp</h2>
+      <ol class="steps">
+        <li>Obre el <a href="https://registreviatgers.mossos.gencat.cat/" target="_blank" rel="noopener">portal</a> → <b>Enviament informació viatgers → Fitxes individuals de viatgers</b> → nou registre.</li>
+        <li>Toca <b>Copiar</b> en cada fila, ves al portal i enganxa-ho al camp que té el mateix nom.</li>
+        <li>Les <b>dates</b> no s'enganxen: toca el camp del portal i escriu els números tal com surten (p. ex. 05092000).</li>
+        <li>Quan acabis tots, al portal prem <b>Enviar registres</b>.</li>
+      </ol>
+      <div class="note ok"><b>Ho vols tot d'una vegada?</b> 1) Arrossega aquest botó a la barra de preferits del navegador (només el primer cop; si no la veus: Ctrl+Maj+B): <a id="bmLink" class="btn small primary" href="#" draggable="true" onclick="return false">Omplir portal Mossos</a><br>2) Prem <b>Copiar-ho tot per al portal</b>. 3) Ves a «Nou registre viatger» al portal i toca el preferit: omple tots els camps. Revisa-ho i desa tu.</div>
+      <div class="row"><button class="btn primary" id="btnCopyAll" type="button">Copiar-ho tot per al portal</button></div>
+      <div id="manRows"></div>
+      <button class="btn" id="btnManDone" type="button">Tancar</button>
     </div>
 
     <div class="card" id="cardFile" hidden>
@@ -757,11 +774,13 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
   /* ---------- validació visual ---------- */
   const paint = () => {
     document.querySelectorAll('.f').forEach((w) => { w.classList.remove('bad', 'warn'); const m = w.querySelector('.msg'); if (m) m.textContent = ''; });
-    const mark = (key, msg, cls) => { const w = document.querySelector(`[data-fw="${key}"]`); if (!w) return; w.classList.add(cls); if (cls === 'bad') w.querySelector('.msg').textContent = msg; };
+    const mark = (key, msg, cls) => { const w = document.querySelector(`[data-fw="${key}"]`); if (!w) return; w.classList.add(cls); if (msg) w.querySelector('.msg').textContent = msg; };
     if (showErr) {
       HF.validateStay(S.stay).forEach((e) => mark('stay.' + e.f, e.m, 'bad'));
       HF.validate(cur, S.stay).forEach((e) => mark((['street', 'country', 'muni', 'locality', 'postcode'].includes(e.f) ? 'addr.' : 'trav.') + e.f, e.m, 'bad'));
     }
+    { const cps = (POSTAL[(cur.muni || '').slice(0, 5)] || '').split(',').filter(Boolean);
+      if (cur.country === 'ESP' && cur.muni && /^\d{5}$/.test(cur.postcode || '') && cps.length && !cps.includes(cur.postcode)) mark('addr.postcode', 'Aquest codi postal no correspon al municipi triat (' + cps.slice(0, 3).join(', ') + '). Revisa el municipi.', 'warn'); }
     addrWarn.forEach((k) => { const w = document.querySelector(`[data-fw="addr.${k}"]`); if (w && !w.classList.contains('bad')) w.classList.add('warn'); });
     mrzBad.forEach((k) => { const m = { doc: 'trav.docNumber', birth: 'trav.birth', exp: null }[k]; if (m && !document.querySelector(`[data-fw="${m}"]`).classList.contains('bad')) mark(m, '', 'warn'); });
   };
@@ -1072,7 +1091,7 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
       const iss = t.generated ? [] : allIssues(t);
       const pill = t.generated ? '<span class="pill gen">Fitxer generat</span>' : iss.length ? '<span class="pill warn">Falta revisar</span>' : '<span class="pill ok">A punt</span>';
       const d = t.data; const nm = [d.name, d.surname1, d.surname2].filter(Boolean).join(' ');
-      return `<div class="item" data-id="${t.id}"><div class="top"><div><div class="n">${esc(nm)}</div><div class="d">${esc(d.docNumber || 'sense document')} · ${esc(t.stay.number)}</div></div>${pill}</div>${iss.length ? `<ul>${iss.map((e) => `<li>${esc(e.m)}</li>`).join('')}</ul>` : ''}<div class="row"><button class="btn small" data-act="edit" type="button">Editar</button><button class="btn small danger" data-act="del" type="button">Esborrar</button></div></div>`;
+      return `<div class="item" data-id="${t.id}"><div class="top"><div><div class="n">${esc(nm)}</div><div class="d">${esc(d.docNumber || 'sense document')} · ${esc(t.stay.number)}</div></div>${pill}</div>${iss.length ? `<ul>${iss.map((e) => `<li>${esc(e.m)}</li>`).join('')}</ul>` : ''}<div class="row"><button class="btn small primary" data-act="manual" type="button">Omplir el portal a mà</button><button class="btn small" data-act="edit" type="button">Editar</button><button class="btn small danger" data-act="del" type="button">Esborrar</button></div></div>`;
     }).join('');
     $('btnGen').disabled = !S.tray.some((t) => !t.generated);
   };
@@ -1082,12 +1101,82 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
       if (b.dataset.armed) { S.tray = S.tray.filter((x) => x !== t); save(); renderAll(); toast('Fitxa esborrada'); }
       else { b.dataset.armed = '1'; b.textContent = 'Segur? Torna a tocar'; setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Esborrar'; }, 3000); }
     }
+    if (b.dataset.act === 'manual') { showManual(t); return; }
     if (b.dataset.act === 'edit') {
       cur = { ...emptyTrav(), ...t.data }; editingId = t.id; S.stay = { ...t.stay }; showErr = true;
       $('btnAdd').textContent = 'Desar els canvis'; $('btnCancelEdit').hidden = false;
       pushValues(); paint(); switchTo('reg'); window.scrollTo({ top: 0 });
     }
   });
+
+  /* ---------- omplir el portal a mà (camp a camp) ---------- */
+  const fD = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
+  const fDT = (iso, t) => (iso ? fD(iso) + (t ? ' ' + t : '') : '');
+  const FILLJS = "(async function () { var N = function (s) { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[*:?\u00bf]/g, '').replace(/\\s+/g, ' ').trim(); }; var txt = ''; try { txt = await navigator.clipboard.readText(); } catch (e) {} var D = null; try { D = JSON.parse(txt); } catch (e) {} if (!D || D.hf !== 1) { txt = prompt('Enganxa aqu\u00ed les dades copiades de HosteF\u00e0cil (Ctrl+V):') || ''; try { D = JSON.parse(txt); } catch (e) { D = null; } } if (!D || D.hf !== 1) { alert('No he trobat dades de HosteF\u00e0cil. A l\\'app prem \u00abCopiar-ho tot per al portal\u00bb i torna-ho a provar.'); return; } var docs = [document]; (function walk(w) { try { for (var i = 0; i < w.frames.length; i++) { try { var d = w.frames[i].document; if (d) { docs.push(d); walk(w.frames[i]); } } catch (e) {} } } catch (e) {} })(window); var done = [], missing = []; var ctrlsIn = function (root) { return Array.prototype.slice.call(root.querySelectorAll('input,select,textarea')).filter(function (c) { return c.type !== 'hidden' && c.type !== 'submit' && c.type !== 'button' && !c.disabled; }); }; var findCtrl = function (label) { var want = N(label), out = null; docs.forEach(function (doc) { if (out) return; var els = Array.prototype.slice.call(doc.querySelectorAll('label,td,th,span,div,b,strong,p,dt')); var cands = els.filter(function (e) { var t = e.textContent; return t && t.length < 90 && N(t) === want && !e.querySelector('input,select,textarea'); }); cands.some(function (e) { var c = null; if (e.tagName === 'LABEL' && e.control) c = e.control; if (!c) { var tr = e.closest('tr'); if (tr) { var cs = ctrlsIn(tr); if (cs.length) c = cs[0]; } } if (!c) { var n = e.nextElementSibling; while (n && !c) { var cs2 = n.matches && n.matches('input,select,textarea') ? [n] : ctrlsIn(n); if (cs2.length) c = cs2[0]; n = n.nextElementSibling; } } if (!c && e.parentElement) { var p = e.parentElement.nextElementSibling; if (p) { var cs3 = ctrlsIn(p); if (cs3.length) c = cs3[0]; } } if (c) { out = c; return true; } return false; }); }); return out; }; var fire = function (c) { ['input', 'change', 'blur'].forEach(function (t) { c.dispatchEvent(new Event(t, { bubbles: true })); }); }; var setText = function (c, v) { var proto = c.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; var d = Object.getOwnPropertyDescriptor(proto, 'value'); if (d && d.set) d.set.call(c, v); else c.value = v; fire(c); }; var pickOpt = function (c, kws) { var opts = Array.prototype.slice.call(c.options), best = null; kws = kws.map(N).filter(Boolean); opts.forEach(function (o) { var t = N(o.text); if (!t || /^seleccioni/.test(t)) return; kws.forEach(function (k, i) { var s = t === k ? 100 - i : (t.indexOf(k) >= 0 ? 50 - i : 0); if (s && (!best || s > best.s)) best = { o: o, s: s }; }); }); if (best) { c.value = best.o.value; fire(c); return true; } return false; }; var put = function (label, value, kind, kws) { if (value === '' || value == null || value === false && kind !== 'check') return; var c = findCtrl(label); if (!c) { missing.push(label); return; } try { if (c.tagName === 'SELECT') { if (!pickOpt(c, kws || [String(value)])) { missing.push(label + ' (opci\u00f3 \u00ab' + value + '\u00bb)'); return; } } else if (c.type === 'checkbox') { if (c.checked !== !!value) c.click(); } else if (c.type === 'date') setText(c, String(value).slice(0, 10)); else if (c.type === 'datetime-local') setText(c, String(value)); else setText(c, String(value)); done.push(label); } catch (e) { missing.push(label); } }; var DOC = { D: ['dni', 'nif'], N: ['nie', 'tie', 'residencia', 'resid'], P: ['passaport', 'pasaporte'] }; var SEX = { M: ['masculi', 'home', 'hombre', 'varon'], F: ['femeni', 'dona', 'mujer'], A: ['altre', 'otro'] }; var PAY = { TARJT: ['targeta de credit', 'tarjeta de credito', 'targeta', 'tarjeta'], EFECT: ['efectiu', 'efectivo'], TRANS: ['transferencia'], PLATF: ['plataforma'], DESTI: ['desti', 'destino'], MOVIL: ['mobil', 'movil'], TREG: ['regal'], OTRO: ['altres', 'otros'] }; var NAT = [D.nat].concat(D.nat === 'Espanya' ? ['Espa\u00f1a', 'Spain'] : []); put('N\u00famero de contracte', D.contractNumber); put('Data formalitzaci\u00f3 contracte', D.contractDate, 'date'); put('Data entrada', D.inDT, 'dt'); put('Data sortida', D.outDT, 'dt'); put('Nombre de viatgers', D.travelers); put('Tipus pagament', D.pay, 'sel', PAY[D.pay]); put('Nombre d\\'habitacions', D.rooms); put('L\\'establiment disposa d\\'internet?', D.internet === 'S', 'check'); put('Tipus document identificatiu', D.docType, 'sel', DOC[D.docType]); put('Document identificatiu', D.docNumber); put('N\u00famero suport document', D.support); put('Data expedici\u00f3', D.issueDate, 'date'); put('Nom', D.name); put('1r cognom', D.surname1); put('2n cognom', D.surname2); put('Sexe', D.sex, 'sel', SEX[D.sex]); put('Data naixement', D.birth, 'date'); put('Pa\u00eds / Nacionalitat', D.nat, 'sel', NAT); put('Correu electr\u00f2nic', D.email); if (D.kin) put('Relaci\u00f3 de parentesc entre els viatgers', D.kin, 'sel', [D.kinText]); put('Tel\u00e8fon', D.phone); put('Adre\u00e7a', D.street); put('Municipi', D.muniName, 'sel', [D.muniName]); put('Codi postal', D.postcode); alert('HosteF\u00e0cil: omplerts ' + done.length + ' camps.' + (missing.length ? '\\n\\nNo he trobat o no he pogut omplir:\\n- ' + missing.join('\\n- ') + '\\n\\nRevisa-ho a m\u00e0 abans d\\'enviar.' : '\\n\\nRevisa-ho tot i prem Desar/Enviar tu.')); })();";
+  const showManual = (t) => {
+    const d = t.data, s = t.stay, st = S.settings;
+    const cnt = S.tray.filter((x) => x.stay.number === s.number && x.stay.inDate === s.inDate).length;
+    const cname = (c) => { const r = COUNTRIES.find((x) => x[0] === c); return r ? r[1] : (c || ''); };
+    const docL = { D: 'DNI / NIF', N: 'NIE / TIE', P: 'Passaport' }[d.docType] || '';
+    const payL = (PAYL.find((p) => p[0] === s.pay) || [0, s.pay || ''])[1];
+    const sexL = { M: 'Masculí / Home', F: 'Femení / Dona', A: 'Altre' }[d.sex] || '';
+    const kinL = (KINL.find((k) => k[0] === d.kin) || [0, ''])[1];
+    const num = (s.number || '').replace(/\s/g, '');
+    const G = (title) => ({ h: title });
+    const R = (l, v, copy = true) => ({ l, v: v == null ? '' : String(v), copy });
+    const spanishDoc = d.docType === 'D' || d.docType === 'N';
+    const rows = [
+      G('Dades del contracte'),
+      R('Tipus de registre', s.type === 'R' ? 'Reserva' : 'Contracte en curs', false),
+      R('Establiment assignat', st.name || '', false),
+      R('Número de contracte', num),
+      R('Data formalització contracte', fD(s.contractDate)),
+      R('Data entrada', fDT(s.inDate, s.inTime)),
+      R('Data sortida', fDT(s.outDate, s.outTime)),
+      R('Nombre de viatgers', cnt),
+      R('Tipus pagament', payL, false),
+      R('Nombre d\'habitacions', s.rooms || ''),
+      R('Establiment amb internet', s.internet === 'S' ? 'Sí (marca la casella)' : 'No (deixa-la buida)', false),
+      G('Dades de la persona'),
+      R('Tipus document identificatiu', docL, false),
+      R('Document identificatiu', HF.clean(d.docNumber || '').replace(/[\s-]/g, '')),
+      spanishDoc ? R('Número suport document', HF.clean(d.support || '')) : null,
+      R('Data expedició', fD(d.issueDate)),
+      R('Nom', HF.cleanName(d.name)),
+      R('1r cognom', HF.cleanName(d.surname1)),
+      R('2n cognom', HF.cleanName(d.surname2)),
+      R('Sexe', sexL, false),
+      R('Data naixement', fD(d.birth)),
+      R('País / Nacionalitat', cname(d.nationality), false),
+      R('Correu electrònic', (s.email || '').trim()),
+      R('Telèfon', (s.phone || '').replace(/\s/g, '')),
+      (d.kin && kinL) ? R('Relació de parentesc', kinL, false) : null,
+      G('Adreça de residència'),
+      R('Adreça', HF.clean(d.street)),
+      R('País', cname(d.country), false),
+      R(d.country === 'ESP' ? 'Municipi' : 'Localitat', d.country === 'ESP' ? (d.muniName || '') : HF.clean(d.locality)),
+      R('Codi postal', (d.postcode || '').replace(/\s/g, '')),
+    ].filter(Boolean);
+    const kk = KINL.find((k) => k[0] === d.kin);
+    window.__payload = { hf: 1, contractNumber: num, contractDate: s.contractDate || '', inDT: s.inDate ? s.inDate + 'T' + (s.inTime || '00:00') : '', outDT: s.outDate ? s.outDate + 'T' + (s.outTime || '00:00') : '', travelers: cnt, pay: s.pay, rooms: s.rooms || '', internet: s.internet || '', docType: d.docType, docNumber: HF.clean(d.docNumber || '').replace(/[\s-]/g, ''), support: spanishDoc ? HF.clean(d.support || '') : '', issueDate: d.issueDate || '', name: HF.cleanName(d.name), surname1: HF.cleanName(d.surname1), surname2: HF.cleanName(d.surname2), sex: d.sex, birth: d.birth || '', nat: cname(d.nationality), email: (s.email || '').trim(), kin: d.kin || '', kinText: kk ? kk[1] : '', phone: (s.phone || '').replace(/\s/g, ''), street: HF.clean(d.street), muniName: d.country === 'ESP' ? (d.muniName || '') : HF.clean(d.locality), postcode: (d.postcode || '').replace(/\s/g, '') };
+    $('bmLink').href = 'javascript:' + encodeURIComponent(FILLJS);
+    $('manTitle').textContent = 'Portal: ' + [d.name, d.surname1].filter(Boolean).join(' ');
+    $('manRows').innerHTML = rows.map((r, i) => r.h ? `<div class="mh">${esc(r.h)}</div>` : r.v === '' ? '' : `<div class="mrow" data-i="${i}"><div class="ml">${esc(r.l)}</div><div class="mv">${esc(r.v)}</div>${r.copy ? '<button class="btn small" type="button">Copiar</button>' : ''}</div>`).join('');
+    $('manRows').dataset.vals = JSON.stringify(rows.map((r) => r.v));
+    $('cardManual').hidden = false; $('cardManual').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('manRows').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b) return; const row = b.closest('.mrow'); const vals = JSON.parse($('manRows').dataset.vals || '[]');
+    let v = vals[+row.dataset.i] || ''; if (/^\d{2}\/\d{2}\/\d{4}/.test(v)) v = v; // les dates es copien tal qual
+    try { await navigator.clipboard.writeText(v); } catch (e) { const ta = document.createElement('textarea'); ta.value = v; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e2) {} ta.remove(); }
+    row.classList.add('done'); b.textContent = '✓ Copiat'; toast('Copiat: ' + (v.length > 30 ? v.slice(0, 30) + '…' : v));
+  });
+  $('btnCopyAll').addEventListener('click', async () => {
+    const v = JSON.stringify(window.__payload || {});
+    try { await navigator.clipboard.writeText(v); } catch (e) { const ta = document.createElement('textarea'); ta.value = v; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e2) {} ta.remove(); }
+    toast('Copiat. Ara ves al portal i toca el preferit «Omplir portal Mossos»');
+  });
+  $('btnManDone').addEventListener('click', () => { $('cardManual').hidden = true; });
   $('btnCancelEdit').addEventListener('click', () => { cur = emptyTrav(); editingId = null; showErr = false; $('btnAdd').textContent = 'Afegir a la safata'; $('btnCancelEdit').hidden = true; pushValues(); paint(); });
   $('btnApplyStay').addEventListener('click', () => {
     S.tray.forEach((t) => { if (!t.generated) t.stay = { ...S.stay }; }); save(); renderAll(); toast('Estada aplicada a les fitxes pendents');
