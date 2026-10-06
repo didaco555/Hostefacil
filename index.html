@@ -374,7 +374,17 @@ const HF = (() => {
   }
   /** Extreu les línies MRZ d'un text d'OCR i en tria la millor combinació. */
   function mrzFromOcr(text, today = new Date()) {
-    const raw = (text || '').toUpperCase().split(/\r?\n/).map((l) => l.replace(/\s+/g, '').replace(/[^A-Z0-9<]/g, '')).filter((l) => l.length >= 26 && (l.match(/</g) || []).length >= 2);
+    const repairLine = (l) => {
+      if (l.slice(2, 5) === 'ESP' && /^[IAC][D<]/.test(l) && l.length >= 24) {
+        const m = l.slice(15).match(/^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])/);
+        if (m && (dniOk(m[1]) || nieOk(m[1]))) return l.slice(0, 15) + m[1] + '<'.repeat(Math.max(0, 15 - m[1].length));
+      }
+      if (/^[\dOIBSZ]{7}[MF<][\dOIBSZ]{7}ESP/.test(l) && l.length >= 24 && /[\dOIBSZ]$/.test(l)) {
+        return fixDigits(l.slice(0, 7)) + l[7] + fixDigits(l.slice(8, 15)) + 'ESP' + '<'.repeat(11) + fixDigits(l.slice(-1));
+      }
+      return l;
+    };
+    const raw = (text || '').toUpperCase().split(/\r?\n/).map((l) => l.replace(/\s+/g, '').replace(/[^A-Z0-9<]/g, '')).filter((l) => l.length >= 24 && ((l.match(/</g) || []).length >= 2 || /^[IAC][D<]ESP\d?[A-Z0-9]{6}/.test(l))).map(repairLine);
     let best = null;
     for (const k of [3, 2]) {
       for (let i = 0; i + k <= raw.length; i++) {
@@ -472,7 +482,9 @@ const HF = (() => {
       if (blk.length >= 4) { street = blk.slice(0, blk.length - 2).join(' '); muni = blk[blk.length - 2]; prov = blk[blk.length - 1]; }
       else { street = blk[0]; muni = blk[1]; prov = blk[2] || ''; }
     }
-    return { street: expandStreet(street), streetRaw: street, muniRaw: muni, provRaw: prov };
+    const ex = expandStreet(street);
+    if (ex.split(' ').length < 2 || !(ST.test(street.trim() + ' ') || /\d/.test(street))) return null;
+    return { street: ex, streetRaw: street, muniRaw: muni, provRaw: prov };
   }
 
   /* ---------- text i dates ---------- */
@@ -851,7 +863,7 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
   const mrzBox = (lines) => {
     const L = (lines || []).filter((l) => /</.test(l.text) && l.text.replace(/\s/g, '').length >= 20 && l.bbox);
     if (L.length < 2) return null;
-    return { x0: Math.min(...L.map((l) => l.bbox.x0)), x1: Math.max(...L.map((l) => l.bbox.x1)), y0: Math.min(...L.map((l) => l.bbox.y0)) };
+    return { x0: Math.min(...L.map((l) => l.bbox.x0)), x1: Math.max(...L.map((l) => l.bbox.x1)), y0: Math.min(...L.map((l) => l.bbox.y0)), y1: Math.max(...L.map((l) => l.bbox.y1)) };
   };
 
   /* ---------- adreça del domicili: es llegeix de la mateixa foto, just a sobre de les línies ---------- */
@@ -865,18 +877,14 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
   const readAddress = async (bmp, m, say) => {
     if (!m || !m.box) return null;
     const w = await getSpa(); let part = null;
-    const base2 = Math.min(3, 3400 / Math.max(bmp.width, bmp.height)); const k = base2 / m.base;
-    const src = rotatedCanvas(bmp, base2, m.ang);
-    const bw = m.box.x1 - m.box.x0;
-    const cx0 = Math.max(0, (m.box.x0 - 0.1 * bw) * k), cx1 = Math.min(src.width, (m.box.x1 + 0.1 * bw) * k);
-    const cy1 = Math.min(src.height, (m.box.y0 + m.y0) * k + 4 * k); const cardW = cx1 - cx0; const cy0 = Math.max(0, cy1 - 0.66 * cardW);
+    const bw0 = m.box.x1 - m.box.x0, cardW = bw0 * 1.12;
+    const rx0 = m.box.x0 - 0.1 * bw0, rw = 1.2 * bw0, ry1 = m.box.y0 + m.y0 + 4, ry0 = ry1 - 0.66 * cardW;
     for (const [tw, mode] of [[2000, '3'], [2600, '3'], [2000, '11']]) {
       say('Llegint l\'adreça del DNI…');
-      const sc = tw / cardW; const c = document.createElement('canvas'); c.width = Math.round(cardW * sc); c.height = Math.round((cy1 - cy0) * sc);
-      c.getContext('2d').drawImage(src, cx0, cy0, cardW, cy1 - cy0, 0, 0, c.width, c.height); stretch(c);
+      const c = cropRot(bmp, m.ang, m.base, rx0, ry0, rw, ry1 - ry0, tw); stretch(c);
       await w.setParameters({ tessedit_pageseg_mode: mode });
       const { data } = await w.recognize(c);
-      (window.__dbg=window.__dbg||[]).push(tw+'/'+mode+'\n'+data.text); const dom = HF.parseDomicile(data.text, PROV); if (!dom || !dom.street) continue;
+      const dom = HF.parseDomicile(data.text, PROV); if (!dom || !dom.street) continue;
       const mm = HF.matchMuni(dom.muniRaw, dom.provRaw, MUNI_IDX, PROV);
       const res = { street: dom.street, muni: mm, raw: dom };
       if (mm) return res; if (!part) part = res;
@@ -896,43 +904,123 @@ const POSTAL={"10001":"10748","10002":"10262","10003":"10857","10004":"10879","1
     pushValues(); paint(); return msg;
   };
 
-  let reading = false;
+  /* retalla una zona de la foto (en coordenades del llenç girat a escala `sc`) i la dibuixa ampliada, sense crear llenços enormes */
+  const cropRot = (bmp, ang, sc, rx0, ry0, rw, rh, outW) => {
+    const r = ang * Math.PI / 180, bw = bmp.width * sc, bh = bmp.height * sc;
+    const W1 = Math.abs(bw * Math.cos(r)) + Math.abs(bh * Math.sin(r)), H1 = Math.abs(bw * Math.sin(r)) + Math.abs(bh * Math.cos(r));
+    const m = outW / rw; const c = document.createElement('canvas'); c.width = Math.round(outW); c.height = Math.max(8, Math.round(rh * m));
+    const x = c.getContext('2d'); x.fillStyle = '#808080'; x.fillRect(0, 0, c.width, c.height); x.imageSmoothingQuality = 'high';
+    const a = m * sc * Math.cos(r), b = m * sc * Math.sin(r), cx = bmp.width / 2, cy = bmp.height / 2;
+    x.setTransform(a, b, -b, a, (W1 / 2 - rx0) * m - (a * cx - b * cy), (H1 / 2 - ry0) * m - (b * cx + a * cy));
+    x.drawImage(bmp, 0, 0); x.setTransform(1, 0, 0, 1, 0, 0); return c;
+  };
+  /* llindar adaptatiu: ajuda amb ombres i reflexos */
+  const binarize = (c) => {
+    const w = c.width, h = c.height, x = c.getContext('2d', { willReadFrequently: true }); const im = x.getImageData(0, 0, w, h), d = im.data;
+    const I = new Float64Array((w + 1) * (h + 1));
+    for (let j = 0; j < h; j++) { let row = 0; for (let i = 0; i < w; i++) { row += d[(j * w + i) * 4]; I[(j + 1) * (w + 1) + i + 1] = I[j * (w + 1) + i + 1] + row; } }
+    const R = Math.max(12, Math.round(w / 28));
+    for (let j = 0; j < h; j++) {
+      const y0 = Math.max(0, j - R), y1 = Math.min(h, j + R + 1);
+      for (let i = 0; i < w; i++) {
+        const x0 = Math.max(0, i - R), x1 = Math.min(w, i + R + 1);
+        const sum = I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+        const mean = sum / ((x1 - x0) * (y1 - y0)); const p = (j * w + i) * 4;
+        const v = d[p] < mean * 0.85 ? 0 : 255; d[p] = d[p + 1] = d[p + 2] = v;
+      }
+    }
+    x.putImageData(im, 0, 0); return c;
+  };
+
+  let reading = false, readId = 0;
   const readPhoto = async (file) => {
     if (reading) { toast('Ja s\'està llegint la foto…'); return; }
     if (!window.HF_OCR) { setOcr('Aquesta versió no llegeix fotos soles. Enganxa les línies a sota.', 'err'); return; }
     setOcr('Llegint el document…'); $('mrzStatus').scrollIntoView({ block: 'center', behavior: 'smooth' });
     const loaded = await (window.HF_READY || Promise.resolve(false));
-    if (!loaded || typeof Tesseract === 'undefined') { setOcr('El lector de fotos no s\'ha carregat: falten fitxers al repositori de GitHub (tesseract.min.js, worker.min.js, els dos tesseract-core, mrz.traineddata i spa.traineddata). Ves a Ajustos → Lector de fotos → Comprovar.', 'err'); return; }
-    reading = true; const btn = $('btnRead'); btn.disabled = true; btn.textContent = 'Llegint…';
-    const t0 = Date.now(); let tries = 0;
+    if (!loaded || typeof Tesseract === 'undefined') { setOcr('El lector de fotos no s\'ha carregat: falten fitxers al repositori de GitHub (tesseract.min.js, worker.min.js, els dos tesseract-core, mrz.traineddata i spa.traineddata). Prem «Comprova» a Ajustos → Lector de fotos, o enganxa les línies a sota.', 'err'); return; }
+    reading = true; const myId = ++readId; const btn = $('btnRead'); btn.disabled = true; btn.textContent = 'Llegint…';
+    const t0 = Date.now(); const LIMIT = 55000;
     const say = (m) => setOcr(`${m} (${Math.round((Date.now() - t0) / 1000)} s)`);
+    let meta = null, best = null, bmp = null;
     try {
       say('Llegint el document…');
-      const bmp = await createImageBitmap(file);
-      const w = await getWorker(); let best = null; let meta = null; let psm = '';
+      bmp = await createImageBitmap(file);
+      const w = await getWorker(); let psm = '';
       const setPsm = async (m) => { if (psm !== m) { await w.setParameters({ tessedit_pageseg_mode: m }); psm = m; } };
-      // [angle, fracció inicial, mode de segmentació]. El mode 3 troba el text sol a tota la foto.
-      const plan = [[0, 0, '3'], [0, 0.5, '6'], [0, 0.35, '6'], [270, 0, '3'], [90, 0, '3'], [180, 0, '3'],
-        [4, 0, '3'], [-4, 0, '3'], [8, 0, '3'], [-8, 0, '3'], [4, 0.5, '6'], [-4, 0.5, '6'], [270, 0.5, '6'], [90, 0.5, '6'], [0, 0.62, '6']];
-      for (const [ang, frac, mode] of plan) {
-        if (Date.now() - t0 > 75000) break;
-        tries++; say(ang ? 'Provant d\'enderrerir la foto…' : 'Llegint el document…');
-        await setPsm(mode);
-        const cv = prepCanvas(bmp, frac, ang);
-        const { data } = await w.recognize(cv);
-        const r = HF.mrzFromOcr(data.text);
-        if (r && (!best || r.score < best.score)) { best = r; meta = { ang, base: cv._m.base, y0: cv._m.y0, box: mrzBox(data.lines) }; }
+      const plaus = (r) => { const d = r.data || {}; if (r.score === 0) return true; return r.score <= 2 && (/^\d{8}[A-Z]$/.test(d.docNumber || '') || /^[XYZ]\d{7}[A-Z]$/.test(d.docNumber || '')) && !!d.name && !!d.surname1; };
+      const pool = []; const MAXD = Math.max(bmp.width, bmp.height);
+      const take = (data, info) => {
+        pool.push(data.text); const r = HF.mrzFromOcr(data.text);
+        if (r && plaus(r) && (!best || r.score < best.score)) { best = r; if (info) meta = info; }
+        return r;
+      };
+      const lt = (data) => (data.lines || []).reduce((n, l) => n + ((l.text.replace(/\s/g, '').match(/</g) || []).length >= 6 ? (l.text.match(/</g) || []).length : 0), 0);
+      // 1) mirada ràpida en versió petita: troba l'orientació i on són les línies «<<<»
+      const scan = async (ang, long) => {
+        const sc = Math.min(1, long / MAXD); const cv = rotatedCanvas(bmp, sc, ang); stretch(cv);
+        await setPsm('3'); const { data } = await w.recognize(cv);
+        const box = mrzBox(data.lines); const n = lt(data);
+        const r = take(data, { ang, base: sc, y0: 0, box });
+        return { ang, sc, n, box, r, W: cv.width, H: cv.height };
+      };
+      let found = null;
+      const consider = (s) => { if (s.box && (!found || s.n > found.n)) found = s; };
+      for (const ang of [0, 270, 90, 180]) {
+        if (Date.now() - t0 > LIMIT) break;
+        say(ang ? 'Provant d\'enderrerir la foto…' : 'Llegint el document…');
+        const s = await scan(ang, 1500); consider(s);
         if (best && best.score === 0) break;
+        if (s.n >= 14 && s.box) break;
       }
-      if (!best) { setOcr('No he trobat les línies del document. Fes la foto de la cara amb les línies «<<<<» ben enquadrades i ben il·luminades, o enganxa-les a sota.', 'err'); return; }
+      if (!found && !(best && best.score === 0)) {
+        for (const ang of [5, -5, 275, 265, 95, 85, 10, -10]) {
+          if (Date.now() - t0 > LIMIT) break;
+          say('Provant d\'enderrerir la foto…'); const s = await scan(ang, 1800); consider(s);
+          if ((best && best.score === 0) || (s.n >= 14 && s.box)) break;
+        }
+      }
+      // 2) ampliar només la zona de les línies i tornar-la a llegir amb diferents tractaments
+      if (found && !(best && best.score === 0)) {
+        const bx = found.box, bw = bx.x1 - bx.x0; const rx0 = bx.x0 - 0.05 * bw, rw = bw * 1.1;
+        const ry0 = bx.y0 - 0.07 * bw, rh = Math.max(bx.y1 - bx.y0, 0.2 * bw) + 0.12 * bw;
+        const variants = [[1900, 'g', '6'], [1900, 'b', '6'], [1300, 'g', '6'], [1900, 'g', '3'], [2400, 'b', '6'], [1600, 'g', '11']];
+        for (const [ow, kind, mode] of variants) {
+          if (Date.now() - t0 > LIMIT) break;
+          say('Llegint el document…');
+          const cv = cropRot(bmp, found.ang, found.sc, rx0, ry0, rw, rh, Math.min(ow, Math.max(600, MAXD * 1.2)));
+          stretch(cv); if (kind === 'b') binarize(cv);
+          await setPsm(mode); const { data } = await w.recognize(cv);
+          take(data, null);
+          if (best && best.score === 0) break;
+        }
+        if (!(best && best.score === 0)) { const r = HF.mrzFromOcr(pool.join('\n')); if (r && plaus(r) && (!best || r.score < best.score)) best = r; }
+      }
+      // 3) últim recurs: la foto sencera tallada per franges, amb diversos modes
+      if (!best) {
+        const plan = [[0, 0.5, '6'], [0, 0.35, '6'], [0, 0.62, '6'], [270, 0.5, '6'], [90, 0.5, '6'], [4, 0.5, '6'], [-4, 0.5, '6'], [0, 0, '6']];
+        for (const [ang, frac, mode] of plan) {
+          if (Date.now() - t0 > LIMIT + 25000) break;
+          say('Provant una altra manera de llegir…'); await setPsm(mode);
+          const cv = prepCanvas(bmp, frac, ang, Math.min(1, 2000 / Math.max(bmp.width, 1)));
+          const { data } = await w.recognize(cv);
+          take(data, { ang, base: cv._m.base, y0: cv._m.y0, box: mrzBox(data.lines) });
+          if (best && best.score === 0) break;
+        }
+      }
+      if (!best) { setOcr('No he trobat les línies del document. Fes la foto de la cara amb les línies «<<<<» ben enquadrades, sense reflexos, i amb una mica de marge al voltant. O enganxa les línies a sota.', 'err'); return; }
       const txt = best.lines.join('\n'); $('mrz').value = txt; applyMrz(txt);
-      let amsg = '';
-      try { amsg = fillAddress(await readAddress(bmp, meta, say)); } catch (e) { amsg = ''; }
-      const st = $('mrzStatus');
-      st.insertAdjacentHTML('beforeend', amsg ? `<div class="note warn">${esc(amsg)}</div>` : '<div class="note warn">No he pogut llegir l\'adreça del DNI: escriu-la a mà.</div>');
       toast(best.score === 0 ? 'Document llegit' : 'Document llegit: revisa els camps en groc');
-    } catch (e) { setOcr('No s\'ha pogut llegir la foto (' + (e && (e.message || e.name) || 'error') + '). Enganxa les línies a sota.', 'err'); }
+    } catch (e) { setOcr('No s\'ha pogut llegir la foto (' + (e && (e.message || e.name) || 'error') + '). Enganxa les línies a sota.', 'err'); return; }
     finally { reading = false; btn.disabled = false; btn.textContent = 'Llegir la foto i omplir les dades'; }
+    // 3) l'adreça es llegeix després, sense fer esperar les dades del viatger
+    try {
+      const st = $('mrzStatus'); st.insertAdjacentHTML('beforeend', '<div class="note" id="addrNote">Llegint l\'adreça del DNI…</div>');
+      let a = null; try { a = await Promise.race([readAddress(bmp, meta, () => {}), new Promise((_, rj) => setTimeout(() => rj(new Error('temps')), 40000))]); } catch (e) { a = null; }
+      if (myId !== readId) return;
+      const amsg = a ? fillAddress(a) : '';
+      const n = $('addrNote'); if (n) { n.className = 'note warn'; n.textContent = amsg || 'No he pogut llegir l\'adreça del DNI: escriu-la a mà.'; }
+    } catch (e) { /* res */ }
   };
   let objUrl = null;
   let lastFile = null;
