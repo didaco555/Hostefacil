@@ -116,24 +116,24 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
   <!-- ============ REGISTRAR ============ -->
   <section class="view on" id="v-reg">
     <button class="note warn" id="setupNote" type="button" hidden style="border:0;text-align:left;font:inherit;cursor:pointer">Abans de començar, indica l'identificador policial de l'establiment a <b>Ajustos</b>.</button>
-    <div class="card" id="cardStay">
-      <h2><b>1.</b> Estada <span id="stayBadge"></span></h2>
-      <div class="grid" id="stayGrid"></div>
-      <div class="row"><button class="btn small" id="btnNewStay" type="button">Nova estada (nou contracte)</button></div>
-    </div>
-
     <div class="card">
-      <h2><b>2.</b> Document del viatger</h2>
-      <p class="hint">Fes una foto de la cara del document amb les línies <b>&lt;&lt;&lt;</b> (darrere del DNI, sota la foto del passaport).</p>
-      <label class="btn file primary" for="photo">Fer foto del document
-        <input id="photo" type="file" accept="image/*" capture="environment">
-      </label>
+      <h2><b>1.</b> Foto del document</h2>
+      <p class="hint">Fes la foto o puja-la de la galeria: cara del document amb les línies <b>&lt;&lt;&lt;</b> (darrere del DNI, sota la foto del passaport). Les dades del viatger s'ompliran soles.</p>
+      <div class="row">
+        <label class="btn file primary" for="photo">Fer foto
+          <input id="photo" type="file" accept="image/*" capture="environment">
+        </label>
+        <label class="btn file" for="photoLib">Pujar una foto
+          <input id="photoLib" type="file" accept="image/*">
+        </label>
+      </div>
       <img id="preview" class="preview" alt="Foto del document">
       <div class="f">
         <label for="mrz">Línies del document <i>(MRZ)</i></label>
         <textarea id="mrz" rows="3" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="IDESP…&#10;690905…&#10;COGNOM<NOM<<…"></textarea>
         <p class="hint" id="mrzHint">A l'iPhone: mantén premut sobre les línies de la foto i tria <b>Copiar</b>, o toca el camp i <b>Escanejar text</b> (cámera). Després <b>Enganxar</b>. Es llegeix sol i es comproven els dígits de control.</p>
       </div>
+      <button class="btn primary" id="btnRead" type="button" hidden>Llegir la foto i omplir les dades</button>
       <div class="status" id="mrzStatus"></div>
       <div class="row">
         <button class="btn small" id="btnDemo" type="button">Provar amb un exemple fictici</button>
@@ -142,13 +142,19 @@ details summary{cursor:pointer;font-weight:600;min-height:32px}
     </div>
 
     <div class="card">
-      <h2><b>3.</b> Dades del viatger</h2>
+      <h2><b>2.</b> Dades del viatger</h2>
       <div class="grid" id="travGrid"></div>
     </div>
 
     <div class="card">
-      <h2><b>4.</b> Adreça de residència</h2>
+      <h2><b>3.</b> Adreça de residència</h2>
       <div class="grid" id="addrGrid"></div>
+    </div>
+
+    <div class="card" id="cardStay">
+      <h2><b>4.</b> Estada <span id="stayBadge"></span></h2>
+      <div class="grid" id="stayGrid"></div>
+      <div class="row"><button class="btn small" id="btnNewStay" type="button">Nova estada (nou contracte)</button></div>
     </div>
 
     <div class="actionbar">
@@ -564,7 +570,7 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
       { k: 'birth', l: 'Data de naixement', t: 'date' },
       { k: 'nationality', l: 'Nacionalitat', t: 'select', o: () => countryOpts(cur.nationality), full: 1 },
       { k: 'issueDate', l: 'Data d\'expedició <i>(opcional)</i>', t: 'date' },
-      { k: 'kin', l: 'Parentesc <i>(menors)</i>', t: 'select', o: () => opts(KINL, cur.kin) },
+      { k: 'kin', l: 'Parentesc <i>(només menors d\'edat)</i>', t: 'select', o: () => opts(KINL, cur.kin) },
     ],
     addr: [
       { k: 'country', l: 'País', t: 'select', o: () => countryOpts(cur.country), full: 1 },
@@ -718,15 +724,20 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     finally { reading = false; }
   };
   let objUrl = null;
-  $('photo').addEventListener('change', (e) => {
+  let lastFile = null;
+  const onPhoto = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
+    lastFile = f;
     if (objUrl) URL.revokeObjectURL(objUrl);
     objUrl = URL.createObjectURL(f);
     const p = $('preview'); p.src = objUrl; p.classList.add('on');
     touchStay();
-    if (window.HF_OCR) readPhoto(f); else toast('Mantén premut sobre les línies <<< i tria Copiar');
-  });
-  $('btnClearMrz').addEventListener('click', () => { $('mrz').value = ''; $('mrzStatus').className = 'status'; mrzBad = []; if (objUrl) { URL.revokeObjectURL(objUrl); objUrl = null; } $('preview').classList.remove('on'); $('photo').value = ''; paint(); });
+    if (window.HF_OCR) { $('btnRead').hidden = false; readPhoto(f); } else toast('Mantén premut sobre les línies <<< i tria Copiar');
+  };
+  $('photo').addEventListener('change', onPhoto);
+  $('photoLib').addEventListener('change', onPhoto);
+  $('btnRead').addEventListener('click', () => { if (lastFile) readPhoto(lastFile); });
+  $('btnClearMrz').addEventListener('click', () => { $('mrz').value = ''; $('mrzStatus').className = 'status'; mrzBad = []; if (objUrl) { URL.revokeObjectURL(objUrl); objUrl = null; } $('preview').classList.remove('on'); $('photo').value = ''; $('photoLib').value = ''; lastFile = null; $('btnRead').hidden = true; paint(); });
   $('btnDemo').addEventListener('click', () => {
     const demo = 'I<UTOD231458907<<<<<<<<<<<<<<<\n7408122F3204153UTO<<<<<<<<<<<2\nERIKSSON<<ANNA<MARIA<<<<<<<<<<';
     $('mrz').value = demo; applyMrz(demo);
@@ -774,7 +785,7 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
     if (editingId) { const i = S.tray.findIndex((x) => x.id === editingId); if (i >= 0) S.tray[i] = rec; } else S.tray.push(rec);
     save();
     cur = { ...emptyTrav(), ...lastAddr }; editingId = null; showErr = false; mrzBad = [];
-    $('mrz').value = ''; $('mrzStatus').className = 'status'; $('preview').classList.remove('on'); $('photo').value = '';
+    $('mrz').value = ''; $('mrzStatus').className = 'status'; $('preview').classList.remove('on'); $('photo').value = ''; $('photoLib').value = ''; lastFile = null; $('btnRead').hidden = true;
     $('btnAdd').textContent = 'Afegir a la safata'; $('btnCancelEdit').hidden = true;
     pushValues(); paint(); renderAll();
     toast(iss.length ? `Afegit a la safata, falten ${iss.length} dades` : `Afegit a la safata (${S.tray.length})`);
@@ -849,4 +860,4 @@ const COUNTRIES=[["ESP","Espanya"],["AFG","Afganistan"],["ALA","Åland, illes"],
   if (!S.settings.code) { /* primer ús: mostra Ajustos si falta l'establiment */ }
 })();
 </script>
-<script>if('serviceWorker' in navigator){addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}</script></body></html>
+</body></html>
